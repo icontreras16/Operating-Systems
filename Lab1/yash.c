@@ -1,5 +1,5 @@
 #include <stdio.h>
-//#include <stdlib.h>
+#include <malloc.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdbool.h>
 
 void sig_handler(int signo) {
   if (signo == SIGINT) {
@@ -17,7 +18,6 @@ void sig_handler(int signo) {
 }
 
 int main(int argc, char **argv) {
-
   pid_t pid;
   int status;
   int bytes_read;
@@ -29,12 +29,15 @@ int main(int argc, char **argv) {
   char* input = (char *) malloc(NCHARS +1);
   char * special = "";
   int fd[3];
+  bool amper;
+
 
   for (i=0; i<2001; i++) {
     tokens1[i] = (char *) malloc(15);
     tokens2[i] = (char *) malloc(15);
   }
   while (1) {
+    amper = false;
     special = "";
     for (i=0; i<2001; i++) {
       tokens1[i] = "";
@@ -54,12 +57,22 @@ int main(int argc, char **argv) {
 
     tok = strtok (input, " \t\n");
     while (tok != NULL) {
+      if (strcmp("&", tok) == 0) {
+	amper = true;
+	tok = strtok(NULL, " \t\n");
+	tokens2[i] = NULL;
+	continue;
+      }
       if (strcmp("|", tok) == 0) { // pipe found, get next portion of commands
 	special = "|";
 	tokens1[i] = NULL; // null terminate list of tokens1
 	i = 0;
 	tok = strtok (NULL, " \t\n");
 	while (tok != NULL) {
+	  if (strcmp("&", tok) == 0) {
+	    amper = true;
+	    break;
+	  }
 	  tokens2[i] = tok;
 	  i++;
 	  tok = strtok (NULL, " \t\n");
@@ -129,16 +142,18 @@ int main(int argc, char **argv) {
       close(fd[0]);
       if (pid < 0) {     /* fork a child process           */
 	printf("*** ERROR: forking child process failed\n");
-	exit(1);
+	_exit(1);
       }
       else if (pid == 0) {          /* for the child process:         */
 	if (execvp(tokens1[0], tokens1) < 0) {     /* execute the command  */
 	  printf("*** ERROR: exec failed\n");
-	  exit(1);
+	  _exit(1);
 	}
       }
       else {                                  /* for the parent:      */
-	while (wait(&status) != pid);       /* wait for completion  */
+	if (!amper) {
+	  while (wait(&status) != pid);       /* wait for completion  */
+	}
 	dup2(savestdin, 0);
 	continue;
       }
@@ -151,16 +166,18 @@ int main(int argc, char **argv) {
       close(fd[1]);
       if (pid < 0) {     /* fork a child process           */
 	printf("*** ERROR: forking child process failed\n");
-	exit(1);
+	_exit(1);
       }
       else if (pid == 0) {          /* for the child process:         */
 	if (execvp(tokens1[0], tokens1) < 0) {     /* execute the command  */
 	  printf("*** ERROR: exec failed\n");
-	  exit(1);
+	  _exit(1);
 	}
       }
       else {                                  /* for the parent:      */
-	while (wait(&status) != pid);       /* wait for completion  */
+	if (!amper) {
+	  while (wait(&status) != pid);       /* wait for completion  */
+	}
 	dup2(savestdout, 1);
 	continue;
       }
@@ -173,12 +190,12 @@ int main(int argc, char **argv) {
       close(fd[2]);
       /* if (pid < 0) {     /\* fork a child process           *\/ */
       /* 	printf("*** ERROR: forking child process failed\n"); */
-      /* 	exit(1); */
+      /* 	_exit(1); */
       /* } */
       /* else if (pid == 0) {          /\* for the child process:         *\/ */
       /* 	if (execvp(tokens1[0], tokens1) < 0) {     /\* execute the command  *\/ */
       /* 	  printf("*** ERROR: exec failed\n"); */
-      /* 	  exit(1); */
+      /* 	  _exit(1); */
       /* 	} */
       /* } */
       /* else {                                  /\* for the parent:      *\/ */
@@ -191,14 +208,14 @@ int main(int argc, char **argv) {
       pipe(fd);
       if ((pid = fork()) < 0) {     /* fork a child process           */
 	printf("*** ERROR: forking child process failed\n");
-	exit(1);
+	_exit(1);
       }
       else if (pid == 0) {          /* for the child process:         */
         dup2(fd[1], STDOUT_FILENO);
         close(fd[1]);
 	if (execvp(tokens1[0], tokens1) < 0) {     /* execute the command  */
 	  printf("*** ERROR: exec failed\n");
-	  exit(1);
+	  _exit(1);
 	}
     }
       else {
@@ -208,28 +225,32 @@ int main(int argc, char **argv) {
 	  close(fd[0]);
 	  if (execvp(tokens2[0], tokens2) < 0) {     /* execute the command  */
 	    printf("*** ERROR: exec failed\n");
-	    exit(1);
+	    _exit(1);
 	  }
 	}
 	else {
 	}
       }
-      wait(&status);
+	if (!amper) {
+	  wait(&status);       /* wait for completion  */
+	}
     }
 /* Handles single command entries */
     else {
       if ((pid = fork()) < 0) {     /* fork a child process           */
 	printf("*** ERROR: forking child process failed\n");
-	exit(1);
+	_exit(1);
       }
       else if (pid == 0) {          /* for the child process:         */
 	if (execvp(tokens1[0], tokens1) < 0) {     /* execute the command  */
 	  printf("*** ERROR: exec failed\n");
-	  exit(1);
+	  _exit(1);
 	}
       }
       else {                                  /* for the parent:      */
-	while (wait(&status) != pid);       /* wait for completion  */
+	if (!amper) {
+	  while (wait(&status) != pid);       /* wait for completion  */
+	}
       }
     }
   }
