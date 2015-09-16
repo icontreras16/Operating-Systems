@@ -11,10 +11,44 @@
 #include <signal.h>
 #include <stdbool.h>
 
-void sig_handler(int signo) {
-  if (signo == SIGINT) {
-    kill (0, 0);
+typedef struct process
+{
+  struct process *next;
+  pid_t pid;                                
+} process;
+
+typedef struct job
+{
+  struct job *next;
+  char *command;
+  process *first_process;
+  pid_t pgid;
+} job;
+job *first_job = NULL;
+
+
+void put_job_in_foreground (job *j)
+{
+  int status;
+  int savestdout = dup(STDOUT_FILENO);
+  pid_t stdoutpgid = tcgetpgrp(savestdout);
+  job * i;
+  tcsetpgrp (STDOUT_FILENO, j->pgid);
+  kill(- j->pgid, SIGCONT);
+  waitpid(- j->pgid, &status, 0);
+  tcsetpgrp(STDOUT_FILENO, stdoutpgid);
+  if (first_job->pgid == j->pgid) {
+    first_job = NULL;
+    return;
+  } else {
+    i = first_job;
+    while (i->next->pgid != j->pgid) {
+      i = j->next;
+    }
+    i->next = NULL; // possible mem leak here!
   }
+  //dup2(savestdout, STDOUT_FILENO);
+  //close(savestdout);
 }
 
 int main(int argc, char **argv) {
@@ -30,7 +64,10 @@ int main(int argc, char **argv) {
   char * special = "";
   int fd[3];
   bool amper;
+  int savestdin;
 
+  signal(SIGTTOU, SIG_IGN);
+  signal(SIGTTIN, SIG_IGN);
 
   for (i=0; i<2001; i++) {
     tokens1[i] = (char *) malloc(15);
@@ -45,9 +82,7 @@ int main(int argc, char **argv) {
     }
     i=0;
     printf("$ ");
-    if (signal(SIGINT, sig_handler) == SIG_ERR) {
-      printf("Can't catch SIGINT\n");
-    }
+
     bytes_read = getline (&input, &NCHARS, stdin);
     if (bytes_read == -1) {
       puts ("INPUT ERROR");
@@ -62,6 +97,21 @@ int main(int argc, char **argv) {
 	tok = strtok(NULL, " \t\n");
 	tokens2[i] = NULL;
 	continue;
+      }
+      /* this_is_a_goto_label: */
+      /* i += 1; */
+      /* goto this_is_a_goto_label; */
+      if (strcmp("fg", tok) == 0) {
+	savestdin = dup(0);
+	tokens1[0] = NULL;
+	job* j = first_job;
+	while (j->next != NULL) {
+	  j = j->next;
+	}
+	put_job_in_foreground (j);
+	//goto restart;
+	/* tok = NULL; */
+	/* continue; */
       }
       if (strcmp("|", tok) == 0) { // pipe found, get next portion of commands
 	special = "|";
@@ -126,7 +176,10 @@ int main(int argc, char **argv) {
     if (strcmp("", special) == 0) {
       tokens1[i] = NULL; // null terminate list of tokens1 if no special chars found
     }
-
+    if (strcmp("fg", tokens1[0]) == 0) {
+      dup2(savestdin, 0);
+      continue;
+    }
     /*Execute next portion according to special character received */
     if (strcmp("q", tokens1[0]) == 0) {return 0;}
       
@@ -237,20 +290,41 @@ int main(int argc, char **argv) {
     }
 /* Handles single command entries */
     else {
-      if ((pid = fork()) < 0) {     /* fork a child process           */
+      pid = fork();
+      process * p = (process*) malloc (sizeof(process));
+      p->pid = pid;
+      p->next = NULL;
+      job * j = (job*) malloc (sizeof(job));
+      j->next = NULL;
+      j->pgid = pid;
+      setpgid(j->pgid, pid);
+      j->next = NULL;
+      if (first_job == NULL) {
+	first_job = j;
+      } else {
+	job * i = first_job;
+	while (i != NULL) {
+	  i = i->next;
+	}
+      }
+      if (pid < 0) {
 	printf("*** ERROR: forking child process failed\n");
 	_exit(1);
       }
-      else if (pid == 0) {          /* for the child process:         */
-	if (execvp(tokens1[0], tokens1) < 0) {     /* execute the command  */
+      else if (pid == 0) {
+	if (!amper) {
+	  tcsetpgrp (STDOUT_FILENO, j->pgid);
+	}
+	if (execvp(tokens1[0], tokens1) < 0) {
 	  printf("*** ERROR: exec failed\n");
 	  _exit(1);
 	}
       }
-      else {                                  /* for the parent:      */
+      else {                              
 	if (!amper) {
-	  while (wait(&status) != pid);       /* wait for completion  */
+	  while (wait(&status) != pid);      
 	}
+	continue;
       }
     }
   }

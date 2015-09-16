@@ -1,6 +1,6 @@
 CC=gcc -Wall
 
-CFLAGS= -c
+CFLAGS= -c -g
 
 # this target will compile all the files
 all: yash
